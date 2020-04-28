@@ -4,6 +4,9 @@ from os import system
 from os import name as os_name
 from sys import stderr, exit
 from datetime import datetime
+from pathlib import Path
+import cmd
+import argparse
 
 def clear():
     '''Clears the screen. Written to work on both Windows and UNIX
@@ -47,58 +50,72 @@ def attach_time_to_note(note: str):
 
     return time + " " + note
 
-def init_file(session_title: str, session_number: int):
+def init_file(file_name: str, session_title: str, session_number: int):
     '''Generates the log file. Resets it if it already 
     exists.'''
 
-    file_name = '_'.join(session_title.lower().split(' '))
     date_string = datetime.now().strftime("%m-%d-%Y")
 
     f = open(file_name + '.txt', 'w')
     f.write("Session " + str(session_number) + ": " + session_title + " - " + date_string)
     f.close()
 
-def append_note_to_file(session_title: str, note: str, *, newlines = 2):
+def append_note_to_file(file_name: str, note: str, *, newlines = 2):
     '''Appends a note to the log file.'''
-    file_name = '_'.join(session_title.lower().split(' '))
 
     with open(file_name + '.txt', 'a') as f:
         f.write(("\n" * newlines) + note)
 
-def check_commands(command: str):
-    if command == "-q":
-        exit()
+def check_path(string):
+    '''Checks to see if the passed string is a valid path.
+    Returns the valid path, raises an exception if it is
+    invalid.'''
+    p = Path(string)
+    if p.exists() and p.suffix == '.txt':
+        return p
+    else:
+        raise argparse.ArgumentTypeError('This is not a valid file path.')
+
+def get_options():
+    '''Gets the options that the user inputs when
+    launching the program.'''
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--file', '-f', action='store', type=check_path)
+    options = parser.parse_args()
+    return options
+
+class PowerWords(cmd.Cmd):
     
-def note_prompt():
-    '''Quietly prompts the user for a note. Checks for commands. 
-    If no commands given, returns the note as a string.'''
+    intro = "powerWords v1.0\n"
+    prompt = "PowerWords> "
 
-    clear()
-    note = input()
-    check_commands(note)
-    return note
-
-def main():
-    clear()
-    print("powerWords v0.1\n")
-    print("Commands:")
-    print("-q: quit\n")
-    session_title = session_title_prompt()
-    session_number = session_number_prompt()
-    init_file(session_title, session_number)
-    previous_time = None
-    while True:
-
-        note = note_prompt()
-        current_time = datetime.now().strftime('%I:%M %p')
-
-        if current_time == previous_time:
-            append_note_to_file(session_title, note, newlines=1)
+    def preloop(self):
+        clear()
+        options = get_options()
+        if not options.file:
+            self.session_title = session_title_prompt()
+            self.session_number = session_number_prompt()
+            self.fname = '_'.join(self.session_title.lower().split(' '))
+            init_file(self.fname, self.session_title, self.session_number)
         else:
-            note = attach_time_to_note(note)
-            append_note_to_file(session_title, note)
+            self.fname = options.file.stem
+        self.previous_time = None
+        clear()
+    
+    def do_quit(self, arg_string):
+        '''Exit the application.'''
+        return True
+    
+    def default(self, arg_string):
+        '''Appends a note to the log file.'''
+        self.current_time = datetime.now().strftime('%I:%M %p')
 
-        previous_time = current_time
+        if self.current_time == self.previous_time:
+            append_note_to_file(self.fname, arg_string, newlines=1)
+        else:
+            timed_arg_string = attach_time_to_note(arg_string)
+            append_note_to_file(self.fname, timed_arg_string)
 
-if __name__ == '__main__':
-    main()
+        self.previous_time = self.current_time
+
+if __name__ == '__main__': PowerWords().cmdloop()
