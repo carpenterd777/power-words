@@ -186,8 +186,10 @@ class PowerWords(cmd.Cmd):
         elif p.suffix not in ['.jpg', '.png']:
             print("That file is not an image.", file=stderr)
             return
+
+        path_string = str(p.parents[0]) + '/' + p.name if p.parents else p.name
         
-        doc_image(p.parent.name + '/' + p.name, self.pdf, self.fname)
+        doc_image(path_string, self.pdf, self.fname)
     
     def do_quit(self, arg_string):
         '''Outputs the notes and exits the application.'''
