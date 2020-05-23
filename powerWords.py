@@ -21,7 +21,7 @@ def clear():
     else:
         system('clear') # UNIX
 
-def doc_write(string: str, pdf: FPDF, file_name: str):
+def doc_write(string: str, pdf: FPDF, file_name: Path, *, newlines: int = 2):
     '''Writes the text to the PDF file and log reading file.
 
 
@@ -30,11 +30,12 @@ def doc_write(string: str, pdf: FPDF, file_name: str):
     :param file_name: The name of the file.
     '''
 
+    pdf.set_font('Arial', size = 12)
     pdf.write(LINE_SPACING, string)
-    with open(file_name + '.log', 'a') as f:
-        f.write(string)
+    with file_name.with_suffix('.txt').open('a') as f:
+        f.write(("\n" * newlines) + (string))
 
-def doc_image(image_path: str, pdf: FPDF, file_name: str):
+def doc_image(image_path: Path, pdf: FPDF, file_name: Path):
     '''Adds the image to the document and a string to the log
     indicating the image added.
 
@@ -44,9 +45,9 @@ def doc_image(image_path: str, pdf: FPDF, file_name: str):
     '''
 
     pdf.write(LINE_SPACING, '\n')
-    pdf.image(image_path, w = 50)
-    with open(file_name + '.log', 'a') as f:
-        f.write('\n\n!image ' + image_path)
+    pdf.image(str(image_path), w = 50)
+    with file_name.with_suffix('.txt').open('a') as f:
+        f.write('\n\n!image ' + str(image_path))
 
 def session_number_prompt() -> int:
     '''Prompts the user for the session number until a valid one
@@ -91,7 +92,7 @@ def attach_time_to_note(note: str) -> str:
 
     return time + " " + note
 
-def init_file(file_name: str, session_title: str, session_number: int) -> FPDF:
+def init_file(file_name: Path, session_title: str, session_number: int) -> FPDF:
     '''Generates the document file and data recovery log.
     
     :param file_name: The name of the file.  
@@ -106,16 +107,10 @@ def init_file(file_name: str, session_title: str, session_number: int) -> FPDF:
     pdf.set_title("Session " + str(session_number) + ": " + session_title + " - " + date_string)
     pdf.set_font('Arial', size = 12)
     pdf.add_page()
-    with open(file_name + '.log', 'w') as f:
+    with file_name.with_suffix('.txt').open('a') as f:
         f.write("Session " + str(session_number) + ": " + session_title + " - " + date_string)
     
     return pdf
-
-def append_note_to_file(file_name: str, pdf: FPDF, note: str, *, newlines = 2):
-    '''Appends a note to the file.'''
-
-    pdf.set_font('Arial', size = 12)
-    doc_write(("\n" * newlines) + note, pdf, file_name)
 
 def check_path(path: str) -> Path:
     '''Checks if path is valid.
@@ -127,10 +122,8 @@ def check_path(path: str) -> Path:
     '''
     p = Path(path)
     if p.exists() and p.suffix == '.pdf':
-        if Path(p.stem + '.log').exists():
-            return p
-        else:
-            raise argparse.ArgumentTypeError('Could not find accompanying log file.')
+        #TODO check the tmp directory for the txt recovery file
+        return p
     else:
         raise argparse.ArgumentTypeError('This is not a valid file path.')
 
@@ -145,14 +138,14 @@ def get_options():
     options = parser.parse_args()
     return options
 
-def rewrite_doc(fname: str) -> FPDF:
+def rewrite_doc(file_name: Path) -> FPDF:
     '''Creates a CustomPDF object with all the logs
     from the log file rewritten onto it.
 
     This function is necessary because the CustomPDF object does
     not allow further writes to be made once the output file has been generated.
 
-    :param fname: The name of the file.
+    :param fname: The name of the recovery text file.
     :returns: The rewritten PDF object.
     '''
 
@@ -160,7 +153,7 @@ def rewrite_doc(fname: str) -> FPDF:
 
     pdf.set_font('Arial', size = 12)
 
-    with open(fname + '.log', 'r') as f:
+    with file_name.open() as f:
         lines = f.readlines()
         pdf.set_title(lines[0])
         pdf.add_page()
@@ -208,11 +201,11 @@ class PowerWords(cmd.Cmd):
         if not options.file:
             self.session_title = session_title_prompt()
             self.session_number = session_number_prompt()
-            self.fname = '_'.join(self.session_title.lower().split(' '))
-            self.pdf = init_file(self.fname, self.session_title, self.session_number)
+            self.file_name = Path('_'.join(self.session_title.lower().split(' ')) + '.pdf')
+            self.pdf = init_file(self.file_name, self.session_title, self.session_number)
         else:
-            self.fname = options.file.stem
-            self.pdf = rewrite_doc(self.fname)
+            self.file_name = Path(options.file + '.pdf')
+            self.pdf = rewrite_doc(str(self.file_name))
         self.previous_time = None
         clear()
     
@@ -230,14 +223,12 @@ class PowerWords(cmd.Cmd):
         elif p.suffix not in ['.jpg', '.png']:
             print("That file is not an image.", file=stderr)
             return
-
-        path_string = str(p.parents[0]) + '/' + p.name if p.parents else p.name
-        
-        doc_image(path_string, self.pdf, self.fname)
+    
+        doc_image(str(p), self.pdf, self.file_name)
     
     def do_quit(self, arg_string):
         '''Outputs the notes and exits the application.'''
-        self.pdf.output(self.fname + '.pdf')
+        self.pdf.output(str(self.file_name))
         return True
     
     def default(self, arg_string):
@@ -248,10 +239,10 @@ class PowerWords(cmd.Cmd):
         self.current_time = datetime.now().strftime('%I:%M %p')
 
         if self.current_time == self.previous_time:
-            append_note_to_file(self.fname, self.pdf, arg_string, newlines=1)
+            doc_write(arg_string, self.pdf, self.file_name, newlines=1)
         else:
             timed_arg_string = attach_time_to_note(arg_string)
-            append_note_to_file(self.fname, self.pdf, timed_arg_string)
+            doc_write(timed_arg_string, self.pdf, self.file_name)
 
         self.previous_time = self.current_time
 
