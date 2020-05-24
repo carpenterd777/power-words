@@ -10,6 +10,7 @@ import argparse
 from fpdf import FPDF
 
 LINE_SPACING = 5
+RECOVERY_DIR = Path("./.recovery")
 
 def clear():
     '''Clears the screen. 
@@ -20,6 +21,38 @@ def clear():
         system('cls') # Windows
     else:
         system('clear') # UNIX
+
+def generate_recovery_file() -> Path:
+    '''Generates the session recovery file, with no suffix.
+
+    The session recovery file is named after the date and time the
+    program is run. It is named in the format:
+
+    yyyy(m)m(d)d_(h)h(i)i(s)s
+
+    where "i" are the digits for the minutes and any digits
+    in parentheses are only present when the value has a 
+    tens digit.
+
+    :returns: A Path representing the recovery file for one session.
+    '''
+
+    current_time = datetime.now()
+    session_recovery_path = Path("{0}{1}{2}_{3}{4}{5}".format(
+        current_time.year, 
+        current_time.month, 
+        current_time.day,
+        current_time.hour,
+        current_time.minute,
+        current_time.second
+        ))
+    mkdir(RECOVERY_DIR / session_recovery_path)
+
+    return RECOVERY_DIR / session_recovery_path / session_recovery_path
+
+
+RECOVERY_FILE = generate_recovery_file()
+
 
 def doc_write(string: str, pdf: FPDF, file_name: Path, *, newlines: int = 2):
     '''Writes the text to the PDF file and log reading file.
@@ -204,7 +237,7 @@ class PowerWords(cmd.Cmd):
             self.session_title = session_title_prompt()
             self.session_number = session_number_prompt()
             self.file_name = Path('_'.join(self.session_title.lower().split(' ')) + '.pdf')
-            self.pdf = init_file(self.file_name, self.session_title, self.session_number)
+            self.pdf = init_file(RECOVERY_FILE, self.session_title, self.session_number)
         else:
             self.file_name = Path(options.file + '.pdf')
             self.pdf = rewrite_doc(str(self.file_name))
@@ -212,12 +245,8 @@ class PowerWords(cmd.Cmd):
         clear()
 
         #create recovery directory if it doesnt exist
-        recovery_directory = Path("./.recovery")
-        try:
-            if not recovery_directory.exists():
-                mkdir(recovery_directory)
-        except OSError:
-            print("There was a problem creating the recovery directory.", file=stderr)
+        if not RECOVERY_DIR.exists():
+            mkdir(RECOVERY_DIR)
         
     def do_image(self, arg_string):
         '''Adds an image to the document.
@@ -234,7 +263,7 @@ class PowerWords(cmd.Cmd):
             print("That file is not an image.", file=stderr)
             return
     
-        doc_image(str(p), self.pdf, self.file_name)
+        doc_image(str(p), self.pdf, RECOVERY_FILE)
     
     def do_quit(self, arg_string):
         '''Outputs the notes and exits the application.'''
@@ -249,10 +278,10 @@ class PowerWords(cmd.Cmd):
         self.current_time = datetime.now().strftime('%I:%M %p')
 
         if self.current_time == self.previous_time:
-            doc_write(arg_string, self.pdf, self.file_name, newlines=1)
+            doc_write(arg_string, self.pdf, RECOVERY_FILE, newlines=1)
         else:
             timed_arg_string = attach_time_to_note(arg_string)
-            doc_write(timed_arg_string, self.pdf, self.file_name)
+            doc_write(timed_arg_string, self.pdf, RECOVERY_FILE)
 
         self.previous_time = self.current_time
 
