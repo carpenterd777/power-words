@@ -24,4 +24,4 @@ Exits the program, and outputs the resulting PDF.
 
 ## Opening Up a Previous Session
 
-Using the -f or --file options, the program can open a previous session's PDF file and continue adding to that document. Currently, PowerWords will look for a `session_title.log` file that corresponds to a `session_title.pdf` file in the same file location. This file, as well as any previous image files added to the document last session, are required in order to properly reload the document.
+Using the --recover option, PowerWords can open the previous session's data and generate a new document with the old data plus any new data added. Currently, this is only available for the session immediately prior.
