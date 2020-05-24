@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-from os import system, mkdir
+from os import system, mkdir, listdir
 from os import name as os_name
 from sys import stderr
 from datetime import datetime
@@ -9,6 +9,7 @@ import cmd
 import argparse
 from fpdf import FPDF
 from shutil import copyfile
+from typing import Tuple
 
 LINE_SPACING = 5
 RECOVERY_DIR = Path("./.recovery")
@@ -23,31 +24,33 @@ def clear():
     else:
         system('clear') # UNIX
 
-def generate_recovery_file() -> Path:
-    '''Generates the session recovery file, with no suffix.
+def generate_recovery_dir() -> Tuple[Path, Path]:
+    '''Generates the session recovery directory.
 
-    The session recovery file is named after the date and time the
-    program is run. It is named in the format:
+    The session recovery directory is named after the date 
+    and time the program is run. It is named in the format:
 
-    yyyy(m)m(d)d_(h)h(i)i(s)s
-
-    where "i" are the digits for the minutes and any digits
-    in parentheses are only present when the value has a 
-    tens digit.
+    yyyymmdd_hhmmss .
 
     :returns: A tuple of Paths representing the recovery 
-    directory and recovery text file for one session, 
-    respectively.
+    directory and recovery file within that directory for 
+    one session, respectively.
     '''
+
+    def add_leading_zero(field: int) -> str:
+        field_string = str(field)
+        if len(field_string) == 1:
+            field_string = "0" + field_string
+        return field_string
 
     current_time = datetime.now()
     session_recovery_path = Path("{0}{1}{2}_{3}{4}{5}".format(
         current_time.year, 
-        current_time.month, 
-        current_time.day,
-        current_time.hour,
-        current_time.minute,
-        current_time.second
+        add_leading_zero(current_time.month), 
+        add_leading_zero(current_time.day),
+        add_leading_zero(current_time.hour),
+        add_leading_zero(current_time.minute),
+        add_leading_zero(current_time.second)
         ))
     mkdir(RECOVERY_DIR / session_recovery_path)
 
@@ -64,7 +67,7 @@ def doc_write(string: str, pdf: FPDF, file_name: Path, *, newlines: int = 2):
     '''
 
     pdf.set_font('Arial', size = 12)
-    pdf.write(LINE_SPACING, string)
+    pdf.write(LINE_SPACING, ("\n" * newlines) + (string))
 
     #recovery
     with file_name.with_suffix('.txt').open('a') as f:
@@ -133,6 +136,17 @@ def attach_time_to_note(note: str) -> str:
 
     return time + " " + note
 
+def parse_recovery_dirname(dir_name: str) -> Tuple[datetime, str]:
+    year = int(dir_name[0:4])
+    month = int(dir_name[4:6])
+    day = int(dir_name[6:8])
+    hour = int(dir_name[9:11])
+    minutes = int(dir_name[11:13])
+    seconds = int(dir_name[13:])
+
+    date = datetime(year, month, day, hour=hour, minute=minutes, second=seconds)
+    return (date, dir_name)
+
 def init_file(file_name: Path, session_title: str, session_number: int) -> FPDF:
     '''Generates the document file and data recovery log.
     
@@ -149,7 +163,7 @@ def init_file(file_name: Path, session_title: str, session_number: int) -> FPDF:
     pdf.set_font('Arial', size = 12)
     pdf.add_page()
     with file_name.with_suffix('.txt').open('a') as f:
-        f.write("Session " + str(session_number) + ": " + session_title + " - " + date_string)
+        f.write(str(session_number) + " " + session_title + " " + date_string)
     
     return pdf
 
@@ -163,7 +177,6 @@ def init_file(file_name: Path, session_title: str, session_number: int) -> FPDF:
 #     '''
 #     p = Path(path)
 #     if p.exists() and p.suffix == '.pdf':
-#         #TODO check the tmp directory for the txt recovery file
 #         return p
 #     else:
 #         raise argparse.ArgumentTypeError('This is not a valid file path.')
@@ -178,8 +191,7 @@ def get_options() -> argparse.Namespace:
         description="A command-line tool to quickly take \
         timestamped notes exported to a PDF.")
     parser.add_argument('--recover', 
-    action='store', 
-    type=None, 
+    action='store_true',
     help='continue the notes from last session, adding on to the last PDF file'
     )
     return parser.parse_args()
@@ -196,7 +208,6 @@ def rewrite_doc(file_name: Path) -> FPDF:
     '''
 
     pdf = CustomPDF(orientation='P', unit='mm', format='A4')
-
     pdf.set_font('Arial', size = 12)
 
     with file_name.open() as f:
@@ -236,9 +247,8 @@ class PowerWords(cmd.Cmd):
     '''The primary framework to build the command
     line application.
     '''
-    
-    intro = "powerWords v1.0\n"
-    prompt = "PowerWords> "
+
+    intro = "powerWords v1.1\n"
 
     def preloop(self):
         '''Initialization before the main program loop.'''
@@ -249,18 +259,62 @@ class PowerWords(cmd.Cmd):
         if not RECOVERY_DIR.exists():
             mkdir(RECOVERY_DIR)
 
-        self.session_recovery_dir, self.recovery_file = generate_recovery_file()
-
         #initialize object members
-        if not options.file:
+        if options.recover:
+            #determine the newest recovery directory
+            recovery_entries = listdir(RECOVERY_DIR)
+            if recovery_entries is None:
+                raise FileNotFoundError("No previous session files could be found.")
+
+            recovery_dates = list(map(parse_recovery_dirname, recovery_entries))
+            newest = sorted(recovery_dates, reverse=True)[0][1]
+            self.session_recovery_dir = RECOVERY_DIR / newest
+            self.recovery_file = self.session_recovery_dir / newest
+
+            #create a new pdf object
+            pdf = CustomPDF(orientation='P', unit='mm', format='A4')
+            pdf.set_font('Arial', size = 12)
+
+            #get the appropriate file name from the first line of the log
+            with self.recovery_file.with_suffix('.txt').open() as f:
+                lines = f.readlines()
+                first_line_list = lines[0].split(" ")
+                self.session_number = int(first_line_list[0])
+                
+                self.session_title = ""
+                for i in range(1,len(first_line_list) - 1):
+                    if i == len(first_line_list) - 2:
+                        self.session_title += first_line_list[i]
+                    else:
+                        self.session_title += first_line_list[i] + " "
+                
+                pdf.set_title("Session " 
+                + str(self.session_number) + ": " 
+                + self.session_title 
+                + " - " + first_line_list[-1])
+            
+                #add back each note and image in the order according to the log
+                pdf.add_page()
+                for line in lines[1:]:
+                    if line[0:6] == "!image":
+                        image_path = self.session_recovery_dir / line.split(' ')[1].strip()
+                        if Path(image_path).exists():
+                            pdf.write(LINE_SPACING, '\n')
+                            pdf.image(str(image_path), w=50)
+                    else:  
+                        pdf.write(LINE_SPACING, line)
+                
+            #assign the pdf object to self.pdf to allow for new writes
+            self.pdf = pdf
+        else:
+            self.session_recovery_dir, self.recovery_file = generate_recovery_dir()
             self.session_title = session_title_prompt()
             self.session_number = session_number_prompt()
-            self.file_name = Path('_'.join(self.session_title.lower().split(' ')) + '.pdf')
             self.pdf = init_file(self.recovery_file, self.session_title, self.session_number)
-        else:
-            self.file_name = Path(options.file + '.pdf')
-            self.pdf = rewrite_doc(str(self.file_name))
+
+        self.file_name = Path('_'.join(self.session_title.lower().split(' ')) + '.pdf')
         self.previous_time = None
+        PowerWords.prompt = self.session_title + "> "
         clear()
         
     def do_image(self, arg_string):
