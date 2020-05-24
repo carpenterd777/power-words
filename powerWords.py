@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 
-from os import system
+from os import system, mkdir, listdir
 from os import name as os_name
-from sys import stderr, exit
+from sys import stderr
 from datetime import datetime
 from pathlib import Path
 import cmd
 import argparse
 from fpdf import FPDF
+from shutil import copyfile
+from typing import Tuple
 
 LINE_SPACING = 5
+RECOVERY_DIR = Path("./.recovery")
 
 def clear():
     '''Clears the screen. 
@@ -21,7 +24,40 @@ def clear():
     else:
         system('clear') # UNIX
 
-def doc_write(string: str, pdf: FPDF, file_name: str):
+def generate_recovery_dir() -> Tuple[Path, Path]:
+    '''Generates the session recovery directory.
+
+    The session recovery directory is named after the date 
+    and time the program is run. It is named in the format:
+
+    yyyymmdd_hhmmss .
+
+    :returns: A tuple of Paths representing the recovery 
+    directory and recovery file within that directory for 
+    one session, respectively.
+    '''
+
+    def add_leading_zero(field: int) -> str:
+        field_string = str(field)
+        if len(field_string) == 1:
+            field_string = "0" + field_string
+        return field_string
+
+    current_time = datetime.now()
+    session_recovery_path = Path("{0}{1}{2}_{3}{4}{5}".format(
+        current_time.year, 
+        add_leading_zero(current_time.month), 
+        add_leading_zero(current_time.day),
+        add_leading_zero(current_time.hour),
+        add_leading_zero(current_time.minute),
+        add_leading_zero(current_time.second)
+        ))
+    mkdir(RECOVERY_DIR / session_recovery_path)
+
+    return (RECOVERY_DIR / session_recovery_path,
+    RECOVERY_DIR / session_recovery_path / session_recovery_path)
+
+def doc_write(string: str, pdf: FPDF, file_name: Path, *, newlines: int = 2):
     '''Writes the text to the PDF file and log reading file.
 
 
@@ -30,23 +66,32 @@ def doc_write(string: str, pdf: FPDF, file_name: str):
     :param file_name: The name of the file.
     '''
 
-    pdf.write(LINE_SPACING, string)
-    with open(file_name + '.log', 'a') as f:
-        f.write(string)
+    pdf.set_font('Arial', size = 12)
+    pdf.write(LINE_SPACING, ("\n" * newlines) + (string))
 
-def doc_image(image_path: str, pdf: FPDF, file_name: str):
+    #recovery
+    with file_name.with_suffix('.txt').open('a') as f:
+        f.write(("\n" * newlines) + (string))
+
+def doc_image(image_path: Path, pdf: FPDF, file_name: Path, session_recovery_dir: Path):
     '''Adds the image to the document and a string to the log
     indicating the image added.
 
     :param image_path: The path to which the image is located.  
     :param pdf: The PDF file object to be written to.  
     :param file_name: The name of the file.  
+    :param session_recovery_dir: The path of the recovery directory for this session.
     '''
 
     pdf.write(LINE_SPACING, '\n')
-    pdf.image(image_path, w = 50)
-    with open(file_name + '.log', 'a') as f:
-        f.write('\n\n!image ' + image_path)
+    pdf.image(str(image_path), w = 50)
+
+    #recovery
+    recovery_image_path = session_recovery_dir / image_path.name
+    with file_name.with_suffix('.txt').open('a') as f:
+        f.write('\n\n!image ./' + image_path.name)
+    copyfile(image_path, recovery_image_path)
+    
 
 def session_number_prompt() -> int:
     '''Prompts the user for the session number until a valid one
@@ -91,7 +136,18 @@ def attach_time_to_note(note: str) -> str:
 
     return time + " " + note
 
-def init_file(file_name: str, session_title: str, session_number: int) -> FPDF:
+def parse_recovery_dirname(dir_name: str) -> Tuple[datetime, str]:
+    year = int(dir_name[0:4])
+    month = int(dir_name[4:6])
+    day = int(dir_name[6:8])
+    hour = int(dir_name[9:11])
+    minutes = int(dir_name[11:13])
+    seconds = int(dir_name[13:])
+
+    date = datetime(year, month, day, hour=hour, minute=minutes, second=seconds)
+    return (date, dir_name)
+
+def init_file(file_name: Path, session_title: str, session_number: int) -> FPDF:
     '''Generates the document file and data recovery log.
     
     :param file_name: The name of the file.  
@@ -106,74 +162,25 @@ def init_file(file_name: str, session_title: str, session_number: int) -> FPDF:
     pdf.set_title("Session " + str(session_number) + ": " + session_title + " - " + date_string)
     pdf.set_font('Arial', size = 12)
     pdf.add_page()
-    with open(file_name + '.log', 'w') as f:
-        f.write("Session " + str(session_number) + ": " + session_title + " - " + date_string)
+    with file_name.with_suffix('.txt').open('a') as f:
+        f.write(str(session_number) + " " + session_title + " " + date_string)
     
     return pdf
 
-def append_note_to_file(file_name: str, pdf: FPDF, note: str, *, newlines = 2):
-    '''Appends a note to the file.'''
-
-    pdf.set_font('Arial', size = 12)
-    doc_write(("\n" * newlines) + note, pdf, file_name)
-
-def check_path(path: str) -> Path:
-    '''Checks if path is valid.
-
-    :param path: A filepath.  
-    :returns: The valid Path object.  
-    :raises: argparse.ArgumentTypeError: when log file is missing or the file path
-    is invalid.
-    '''
-    p = Path(path)
-    if p.exists() and p.suffix == '.pdf':
-        if Path(p.stem + '.log').exists():
-            return p
-        else:
-            raise argparse.ArgumentTypeError('Could not find accompanying log file.')
-    else:
-        raise argparse.ArgumentTypeError('This is not a valid file path.')
-
-def get_options():
+def get_options() -> argparse.Namespace:
     '''Gets the options that the user inputs when
     launching the program.
     
-    :returns: The options.
+    :returns: The options, as an argparse.Namespace.
     '''
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--file', '-f', action='store', type=check_path)
-    options = parser.parse_args()
-    return options
-
-def rewrite_doc(fname: str) -> FPDF:
-    '''Creates a CustomPDF object with all the logs
-    from the log file rewritten onto it.
-
-    This function is necessary because the CustomPDF object does
-    not allow further writes to be made once the output file has been generated.
-
-    :param fname: The name of the file.
-    :returns: The rewritten PDF object.
-    '''
-
-    pdf = CustomPDF(orientation='P', unit='mm', format='A4')
-
-    pdf.set_font('Arial', size = 12)
-
-    with open(fname + '.log', 'r') as f:
-        lines = f.readlines()
-        pdf.set_title(lines[0])
-        pdf.add_page()
-        for line in lines[1:]:
-            if line[0:6] == '!image':
-                image_path = line.split(' ')[1]
-                if Path(image_path).exists():
-                    pdf.write(LINE_SPACING, '\n')
-                    pdf.image(image_path, w=50)
-            else:  
-                pdf.write(LINE_SPACING, line)
-    
-    return pdf
+    parser = argparse.ArgumentParser(
+        description="A command-line tool to quickly take \
+        timestamped notes exported to a PDF.")
+    parser.add_argument('--recover', 
+    action='store_true',
+    help='continue the notes from last session, adding on to the last PDF file'
+    )
+    return parser.parse_args()
 
 class CustomPDF(FPDF):
     '''A PDF with a custom header.'''
@@ -197,25 +204,76 @@ class PowerWords(cmd.Cmd):
     '''The primary framework to build the command
     line application.
     '''
-    
-    intro = "powerWords v1.0\n"
-    prompt = "PowerWords> "
+
+    intro = "powerWords v1.1\n"
 
     def preloop(self):
         '''Initialization before the main program loop.'''
         clear()
         options = get_options()
-        if not options.file:
+
+        #create recovery directory if it doesnt exist
+        if not RECOVERY_DIR.exists():
+            mkdir(RECOVERY_DIR)
+
+        #initialize object members
+        if options.recover:
+            #determine the newest recovery directory
+            recovery_entries = listdir(RECOVERY_DIR)
+            if recovery_entries is None:
+                raise FileNotFoundError("No previous session files could be found.")
+
+            recovery_dates = list(map(parse_recovery_dirname, recovery_entries))
+            newest = sorted(recovery_dates, reverse=True)[0][1]
+            self.session_recovery_dir = RECOVERY_DIR / newest
+            self.recovery_file = self.session_recovery_dir / newest
+
+            #create a new pdf object
+            pdf = CustomPDF(orientation='P', unit='mm', format='A4')
+            pdf.set_font('Arial', size = 12)
+
+            #get the appropriate file name from the first line of the log
+            with self.recovery_file.with_suffix('.txt').open() as f:
+                lines = f.readlines()
+                first_line_list = lines[0].split(" ")
+                self.session_number = int(first_line_list[0])
+                
+                self.session_title = ""
+                for i in range(1,len(first_line_list) - 1):
+                    if i == len(first_line_list) - 2:
+                        self.session_title += first_line_list[i]
+                    else:
+                        self.session_title += first_line_list[i] + " "
+                
+                pdf.set_title("Session " 
+                + str(self.session_number) + ": " 
+                + self.session_title 
+                + " - " + first_line_list[-1])
+            
+                #add back each note and image in the order according to the log
+                pdf.add_page()
+                for line in lines[1:]:
+                    if line[0:6] == "!image":
+                        image_path = self.session_recovery_dir / line.split(' ')[1].strip()
+                        if Path(image_path).exists():
+                            pdf.write(LINE_SPACING, '\n')
+                            pdf.image(str(image_path), w=50)
+                    else:  
+                        pdf.write(LINE_SPACING, line)
+                
+            #assign the pdf object to self.pdf to allow for new writes
+            self.pdf = pdf
+        else:
+            self.session_recovery_dir, self.recovery_file = generate_recovery_dir()
             self.session_title = session_title_prompt()
             self.session_number = session_number_prompt()
-            self.fname = '_'.join(self.session_title.lower().split(' '))
-            self.pdf = init_file(self.fname, self.session_title, self.session_number)
-        else:
-            self.fname = options.file.stem
-            self.pdf = rewrite_doc(self.fname)
+            self.pdf = init_file(self.recovery_file, self.session_title, self.session_number)
+
+        self.file_name = Path('_'.join(self.session_title.lower().split(' ')) + '.pdf')
         self.previous_time = None
+        PowerWords.prompt = self.session_title + "> "
         clear()
-    
+        
     def do_image(self, arg_string):
         '''Adds an image to the document.
         
@@ -230,14 +288,12 @@ class PowerWords(cmd.Cmd):
         elif p.suffix not in ['.jpg', '.png']:
             print("That file is not an image.", file=stderr)
             return
-
-        path_string = str(p.parents[0]) + '/' + p.name if p.parents else p.name
-        
-        doc_image(path_string, self.pdf, self.fname)
+    
+        doc_image(p, self.pdf, self.recovery_file, self.session_recovery_dir)
     
     def do_quit(self, arg_string):
         '''Outputs the notes and exits the application.'''
-        self.pdf.output(self.fname + '.pdf')
+        self.pdf.output(str(self.file_name))
         return True
     
     def default(self, arg_string):
@@ -248,10 +304,10 @@ class PowerWords(cmd.Cmd):
         self.current_time = datetime.now().strftime('%I:%M %p')
 
         if self.current_time == self.previous_time:
-            append_note_to_file(self.fname, self.pdf, arg_string, newlines=1)
+            doc_write(arg_string, self.pdf, self.recovery_file, newlines=1)
         else:
             timed_arg_string = attach_time_to_note(arg_string)
-            append_note_to_file(self.fname, self.pdf, timed_arg_string)
+            doc_write(timed_arg_string, self.pdf, self.recovery_file)
 
         self.previous_time = self.current_time
 
