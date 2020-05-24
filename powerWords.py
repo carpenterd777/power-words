@@ -10,6 +10,7 @@ import argparse
 from fpdf import FPDF
 from shutil import copyfile
 from typing import Tuple
+import ctypes
 
 LINE_SPACING = 5
 RECOVERY_DIR = Path("./.recovery")
@@ -215,6 +216,20 @@ class PowerWords(cmd.Cmd):
         #create recovery directory if it doesnt exist
         if not RECOVERY_DIR.exists():
             mkdir(RECOVERY_DIR)
+        
+        '''
+        On Windows, the directory is not fully hidden
+        unless this code is run. See
+        https://stackoverflow.com/questions/19622133 ,
+        https://docs.python.org/3/library/ctypes
+        '''
+        if os_name == 'nt':
+            FILE_ATTRIBUTE_HIDDEN = 0x02
+
+            ret = ctypes.windll.kernel32.SetFileAttributesW(
+                str(RECOVERY_DIR.resolve()), FILE_ATTRIBUTE_HIDDEN)
+            if ret == 0:
+                raise ctypes.WinError("There was a problem hiding the recovery directory.")
 
         #initialize object members
         if options.recover:
