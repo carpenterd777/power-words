@@ -8,6 +8,7 @@ from pathlib import Path
 import cmd
 import argparse
 from fpdf import FPDF
+from shutil import copyfile
 
 LINE_SPACING = 5
 RECOVERY_DIR = Path("./.recovery")
@@ -34,7 +35,9 @@ def generate_recovery_file() -> Path:
     in parentheses are only present when the value has a 
     tens digit.
 
-    :returns: A Path representing the recovery file for one session.
+    :returns: A tuple of Paths representing the recovery 
+    directory and recovery text file for one session, 
+    respectively.
     '''
 
     current_time = datetime.now()
@@ -48,10 +51,11 @@ def generate_recovery_file() -> Path:
         ))
     mkdir(RECOVERY_DIR / session_recovery_path)
 
-    return RECOVERY_DIR / session_recovery_path / session_recovery_path
+    return (RECOVERY_DIR / session_recovery_path,
+    RECOVERY_DIR / session_recovery_path / session_recovery_path)
 
 
-RECOVERY_FILE = generate_recovery_file()
+SESSION_RECOVERY_DIR, RECOVERY_FILE = generate_recovery_file()
 
 
 def doc_write(string: str, pdf: FPDF, file_name: Path, *, newlines: int = 2):
@@ -65,6 +69,8 @@ def doc_write(string: str, pdf: FPDF, file_name: Path, *, newlines: int = 2):
 
     pdf.set_font('Arial', size = 12)
     pdf.write(LINE_SPACING, string)
+
+    #recovery
     with file_name.with_suffix('.txt').open('a') as f:
         f.write(("\n" * newlines) + (string))
 
@@ -79,8 +85,13 @@ def doc_image(image_path: Path, pdf: FPDF, file_name: Path):
 
     pdf.write(LINE_SPACING, '\n')
     pdf.image(str(image_path), w = 50)
+
+    #recovery
+    recovery_image_path = SESSION_RECOVERY_DIR / image_path.name
     with file_name.with_suffix('.txt').open('a') as f:
-        f.write('\n\n!image ' + str(image_path))
+        f.write('\n\n!image ./' + image_path.name)
+    copyfile(image_path, recovery_image_path)
+    
 
 def session_number_prompt() -> int:
     '''Prompts the user for the session number until a valid one
@@ -263,7 +274,7 @@ class PowerWords(cmd.Cmd):
             print("That file is not an image.", file=stderr)
             return
     
-        doc_image(str(p), self.pdf, RECOVERY_FILE)
+        doc_image(p, self.pdf, RECOVERY_FILE)
     
     def do_quit(self, arg_string):
         '''Outputs the notes and exits the application.'''
