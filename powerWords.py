@@ -167,20 +167,6 @@ def init_file(file_name: Path, session_title: str, session_number: int) -> FPDF:
     
     return pdf
 
-# def check_path(path: str) -> Path:
-#     '''Checks if path is valid.
-
-#     :param path: A filepath.  
-#     :returns: The valid Path object.  
-#     :raises: argparse.ArgumentTypeError: when log file is missing or the file path
-#     is invalid.
-#     '''
-#     p = Path(path)
-#     if p.exists() and p.suffix == '.pdf':
-#         return p
-#     else:
-#         raise argparse.ArgumentTypeError('This is not a valid file path.')
-
 def get_options() -> argparse.Namespace:
     '''Gets the options that the user inputs when
     launching the program.
@@ -195,35 +181,6 @@ def get_options() -> argparse.Namespace:
     help='continue the notes from last session, adding on to the last PDF file'
     )
     return parser.parse_args()
-
-def rewrite_doc(file_name: Path) -> FPDF:
-    '''Creates a CustomPDF object with all the logs
-    from the log file rewritten onto it.
-
-    This function is necessary because the CustomPDF object does
-    not allow further writes to be made once the output file has been generated.
-
-    :param file_name: The name of the recovery text file.
-    :returns: The rewritten PDF object.
-    '''
-
-    pdf = CustomPDF(orientation='P', unit='mm', format='A4')
-    pdf.set_font('Arial', size = 12)
-
-    with file_name.open() as f:
-        lines = f.readlines()
-        pdf.set_title(lines[0])
-        pdf.add_page()
-        for line in lines[1:]:
-            if line[0:6] == '!image':
-                image_path = line.split(' ')[1]
-                if Path(image_path).exists():
-                    pdf.write(LINE_SPACING, '\n')
-                    pdf.image(image_path, w=50)
-            else:  
-                pdf.write(LINE_SPACING, line)
-    
-    return pdf
 
 class CustomPDF(FPDF):
     '''A PDF with a custom header.'''
