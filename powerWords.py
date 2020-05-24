@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 
-from os import system
+from os import system, mkdir
 from os import name as os_name
-from sys import stderr, exit
+from sys import stderr
 from datetime import datetime
 from pathlib import Path
 import cmd
@@ -198,6 +198,8 @@ class PowerWords(cmd.Cmd):
         '''Initialization before the main program loop.'''
         clear()
         options = get_options()
+
+        #initialize object members
         if not options.file:
             self.session_title = session_title_prompt()
             self.session_number = session_number_prompt()
@@ -208,7 +210,15 @@ class PowerWords(cmd.Cmd):
             self.pdf = rewrite_doc(str(self.file_name))
         self.previous_time = None
         clear()
-    
+
+        #create recovery directory if it doesnt exist
+        recovery_directory = Path("./.recovery")
+        try:
+            if not recovery_directory.exists():
+                mkdir(recovery_directory)
+        except OSError:
+            print("There was a problem creating the recovery directory.", file=stderr)
+        
     def do_image(self, arg_string):
         '''Adds an image to the document.
         
