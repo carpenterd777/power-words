@@ -54,10 +54,6 @@ def generate_recovery_file() -> Path:
     return (RECOVERY_DIR / session_recovery_path,
     RECOVERY_DIR / session_recovery_path / session_recovery_path)
 
-
-SESSION_RECOVERY_DIR, RECOVERY_FILE = generate_recovery_file()
-
-
 def doc_write(string: str, pdf: FPDF, file_name: Path, *, newlines: int = 2):
     '''Writes the text to the PDF file and log reading file.
 
@@ -74,20 +70,21 @@ def doc_write(string: str, pdf: FPDF, file_name: Path, *, newlines: int = 2):
     with file_name.with_suffix('.txt').open('a') as f:
         f.write(("\n" * newlines) + (string))
 
-def doc_image(image_path: Path, pdf: FPDF, file_name: Path):
+def doc_image(image_path: Path, pdf: FPDF, file_name: Path, session_recovery_dir: Path):
     '''Adds the image to the document and a string to the log
     indicating the image added.
 
     :param image_path: The path to which the image is located.  
     :param pdf: The PDF file object to be written to.  
     :param file_name: The name of the file.  
+    :param session_recovery_dir: The path of the recovery directory for this session.
     '''
 
     pdf.write(LINE_SPACING, '\n')
     pdf.image(str(image_path), w = 50)
 
     #recovery
-    recovery_image_path = SESSION_RECOVERY_DIR / image_path.name
+    recovery_image_path = session_recovery_dir / image_path.name
     with file_name.with_suffix('.txt').open('a') as f:
         f.write('\n\n!image ./' + image_path.name)
     copyfile(image_path, recovery_image_path)
@@ -156,31 +153,36 @@ def init_file(file_name: Path, session_title: str, session_number: int) -> FPDF:
     
     return pdf
 
-def check_path(path: str) -> Path:
-    '''Checks if path is valid.
+# def check_path(path: str) -> Path:
+#     '''Checks if path is valid.
 
-    :param path: A filepath.  
-    :returns: The valid Path object.  
-    :raises: argparse.ArgumentTypeError: when log file is missing or the file path
-    is invalid.
-    '''
-    p = Path(path)
-    if p.exists() and p.suffix == '.pdf':
-        #TODO check the tmp directory for the txt recovery file
-        return p
-    else:
-        raise argparse.ArgumentTypeError('This is not a valid file path.')
+#     :param path: A filepath.  
+#     :returns: The valid Path object.  
+#     :raises: argparse.ArgumentTypeError: when log file is missing or the file path
+#     is invalid.
+#     '''
+#     p = Path(path)
+#     if p.exists() and p.suffix == '.pdf':
+#         #TODO check the tmp directory for the txt recovery file
+#         return p
+#     else:
+#         raise argparse.ArgumentTypeError('This is not a valid file path.')
 
-def get_options():
+def get_options() -> argparse.Namespace:
     '''Gets the options that the user inputs when
     launching the program.
     
-    :returns: The options.
+    :returns: The options, as an argparse.Namespace.
     '''
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--file', '-f', action='store', type=check_path)
-    options = parser.parse_args()
-    return options
+    parser = argparse.ArgumentParser(
+        description="A command-line tool to quickly take \
+        timestamped notes exported to a PDF.")
+    parser.add_argument('--recover', 
+    action='store', 
+    type=None, 
+    help='continue the notes from last session, adding on to the last PDF file'
+    )
+    return parser.parse_args()
 
 def rewrite_doc(file_name: Path) -> FPDF:
     '''Creates a CustomPDF object with all the logs
@@ -189,7 +191,7 @@ def rewrite_doc(file_name: Path) -> FPDF:
     This function is necessary because the CustomPDF object does
     not allow further writes to be made once the output file has been generated.
 
-    :param fname: The name of the recovery text file.
+    :param file_name: The name of the recovery text file.
     :returns: The rewritten PDF object.
     '''
 
@@ -243,21 +245,23 @@ class PowerWords(cmd.Cmd):
         clear()
         options = get_options()
 
+        #create recovery directory if it doesnt exist
+        if not RECOVERY_DIR.exists():
+            mkdir(RECOVERY_DIR)
+
+        self.session_recovery_dir, self.recovery_file = generate_recovery_file()
+
         #initialize object members
         if not options.file:
             self.session_title = session_title_prompt()
             self.session_number = session_number_prompt()
             self.file_name = Path('_'.join(self.session_title.lower().split(' ')) + '.pdf')
-            self.pdf = init_file(RECOVERY_FILE, self.session_title, self.session_number)
+            self.pdf = init_file(self.recovery_file, self.session_title, self.session_number)
         else:
             self.file_name = Path(options.file + '.pdf')
             self.pdf = rewrite_doc(str(self.file_name))
         self.previous_time = None
         clear()
-
-        #create recovery directory if it doesnt exist
-        if not RECOVERY_DIR.exists():
-            mkdir(RECOVERY_DIR)
         
     def do_image(self, arg_string):
         '''Adds an image to the document.
@@ -274,7 +278,7 @@ class PowerWords(cmd.Cmd):
             print("That file is not an image.", file=stderr)
             return
     
-        doc_image(p, self.pdf, RECOVERY_FILE)
+        doc_image(p, self.pdf, self.recovery_file, self.session_recovery_dir)
     
     def do_quit(self, arg_string):
         '''Outputs the notes and exits the application.'''
@@ -289,10 +293,10 @@ class PowerWords(cmd.Cmd):
         self.current_time = datetime.now().strftime('%I:%M %p')
 
         if self.current_time == self.previous_time:
-            doc_write(arg_string, self.pdf, RECOVERY_FILE, newlines=1)
+            doc_write(arg_string, self.pdf, self.recovery_file, newlines=1)
         else:
             timed_arg_string = attach_time_to_note(arg_string)
-            doc_write(timed_arg_string, self.pdf, RECOVERY_FILE)
+            doc_write(timed_arg_string, self.pdf, self.recovery_file)
 
         self.previous_time = self.current_time
 
